@@ -1,0 +1,6 @@
+ingester:
+  source_dir: "C:/path/to/incoming_data"
+  target_tree: "C:/path/to/company_tree"
+  branches: ["Branch_A", "Branch_B", "Branch_C"]
+  report_types: "Headcount Report"
+  log_file: "ingester.log"

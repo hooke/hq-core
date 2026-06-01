@@ -1,9 +1,11 @@
+data/
 __pycache__/
 *.pyc
 .env
-/client/data/
 *.xlsx
 *.xls
 *.zip
 *.rar
 *.7z
+*.bak
+*.log
