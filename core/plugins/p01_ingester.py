@@ -9,8 +9,13 @@ from core.plugins.base import BasePlugin
 
 class ArchiveIngester(BasePlugin):
     def __init__(self, config):
-       self.config = config.get("ingester", {})
-       self.setup_logging()
+        self.config = config.get("ingester", {})
+        self.setup_logging()
+        # Consolidating all parameters here
+        self.source_dir = Path(self.config.get("source_dir", "./incoming"))
+        self.target_tree = Path(self.config.get("target_tree", "./company_tree"))
+        self.branches = self.config.get("branches", [])
+        self.report_type = self.config.get("report_type", {})
 
     def setup_logging(self):
         log_file = self.config.get("log_file", "pipeline.log")
@@ -43,19 +48,31 @@ class ArchiveIngester(BasePlugin):
         for zip_path in src_dir.glob("*.zip"):
             filename = zip_path.stem
 
-            # Parse branch and month
+            # Parse branch
             branch_match = next(
-                (b for b in conf["branches"] if b.lower() in filename.lower()), None
+                (b for b in self.branches if b.lower() in filename.lower()), None
             )
-            month_match = re.search(r"[\._](\d{2})\b", filename)
+            
+            # Match a full date pattern: DD.MM (e.g., 01.06)
+            date_match = re.search(r"(\d{2})\.(\d{2})", filename)
 
-            if not branch_match or not month_match:
+            if date_match:
+                day = date_match.group(1)
+                month = date_match.group(2)
+            else:
+                # Fallback to current month if no date pattern is found
+                month = f"{datetime.now().month:02d}"
+                self.logger.warning(
+                    f"Could not parse date from {filename}. Defaulting to current month: {month}"
+                )
+
+            # If branch doesn't match, skip it. 
+            # (We don't skip for missing date anymore, because we have the fallback above)
+            if not branch_match:
                 self.logger.debug(
-                    f"Skipped: Unrecognized archive format -> {zip_path.name}"
+                    f"Skipped: Unrecognized branch in archive name -> {filename}"
                 )
                 continue
-
-            month = month_match.group(1)
 
             # Build rigid tree: Y/<branch>/reports/<report_type>/<yyyy>/<mm>/
             dest_dir = (
