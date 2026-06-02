@@ -2,5 +2,10 @@ ingester:
   source_dir: "C:/path/to/incoming_data"
   target_tree: "C:/path/to/company_tree"
   branches: ["Branch_A", "Branch_B", "Branch_C"]
-  report_type: "Headcount Report"
+  # The root folder for all reports (e.g., "All Branches reports")
+  report_root: "reports"
+  # Specific report folders mapping -> [match strings]
+  report_types:
+    "headcount_summary": ["HC", "summary"]
+    "status": ["Status"]
   log_file: "ingester.log"

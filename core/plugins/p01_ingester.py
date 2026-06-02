@@ -10,22 +10,26 @@ from core.plugins.base import BasePlugin
 class ArchiveIngester(BasePlugin):
     def __init__(self, config):
         self.config = config.get("ingester", {})
-        self.setup_logging()
         # Consolidating all parameters here
-        self.source_dir = Path(self.config.get("source_dir", "./incoming"))
+        self.log_file = self.config.get("log_file", "pipeline.log")
+        self.src_dir = Path(self.config.get("source_dir", "./incoming"))
         self.target_tree = Path(self.config.get("target_tree", "./company_tree"))
         self.branches = self.config.get("branches", [])
-        self.report_type = self.config.get("report_type", {})
+        self.all_reports_folder = self.config.get("report_group", "reports")
+        self.report_types = self.config.get("report_types", {})
+        # Dynamic fallback for the year
+        self.year = str(self.config.get("year", datetime.now().year))
+
+        self.setup_logging()
 
     def setup_logging(self):
-        log_file = self.config.get("log_file", "pipeline.log")
 
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             handlers=[
-                logging.FileHandler(log_file, encoding="utf-8"),
+                logging.FileHandler(self.log_file, encoding="utf-8"),
                 logging.StreamHandler(),
             ],
         )
@@ -34,28 +38,28 @@ class ArchiveIngester(BasePlugin):
     def run(self):
         self.logger.setLevel(logging.DEBUG)
         self.logger.info("Starting Incoming archive ingestion process...")
-        conf = self.config
-        src_dir = Path(conf["source_dir"])
-        target_base = Path(conf["target_tree"])
-        report_type = conf["report_type"]
-        year = conf["year"]
 
-        if not src_dir.exists():
+        if not self.src_dir.exists():
             self.logger.error(f"Error: Directory {src_dir} does not exist.")
             return
 
         # Search for archives like "Branch_51_27.05.zip"
-        for zip_path in src_dir.glob("*.zip"):
+        for zip_path in self.src_dir.glob("*.zip"):
             filename = zip_path.stem
 
-            # Parse branch
+            # 1. PARSE & CHECK BRANCH FIRST
             branch_match = next(
                 (b for b in self.branches if b.lower() in filename.lower()), None
             )
-            
+            if not branch_match:
+                self.logger.debug(
+                    f"Skipped: Unrecognized branch in archive name -> {filename}"
+                )
+                continue
+
+            # 2. PARSE DATE
             # Match a full date pattern: DD.MM (e.g., 01.06)
             date_match = re.search(r"(\d{2})\.(\d{2})", filename)
-
             if date_match:
                 day = date_match.group(1)
                 month = date_match.group(2)
@@ -66,17 +70,28 @@ class ArchiveIngester(BasePlugin):
                     f"Could not parse date from {filename}. Defaulting to current month: {month}"
                 )
 
-            # If branch doesn't match, skip it. 
-            # (We don't skip for missing date anymore, because we have the fallback above)
-            if not branch_match:
+            # 3. DETERMINE SPECIFIC REPORT FOLDER
+            specific_report_folder = None
+            for folder_name, match_strings in self.report_types.items():
+                if any(s.lower() in filename.lower() for s in match_strings):
+                    specific_report_folder = folder_name
+                    break
+
+            if not specific_report_folder:
                 self.logger.debug(
-                    f"Skipped: Unrecognized branch in archive name -> {filename}"
+                    f"Skipping {filename}: No match strings found for any report type."
                 )
                 continue
 
-            # Build rigid tree: Y/<branch>/reports/<report_type>/<yyyy>/<mm>/
+            # 4. BUILD RIGID TREE
+            # Y/<branch>/<all reports>/<report_type>/<yyyy>/<mm>/
             dest_dir = (
-                target_base / branch_match / "reports" / report_type / year / month
+                self.target_tree
+                / branch_match
+                / self.all_reports_folder
+                / specific_report_folder
+                / self.year
+                / month
             )
             dest_dir.mkdir(parents=True, exist_ok=True)
 
