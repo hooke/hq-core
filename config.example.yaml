@@ -2,10 +2,31 @@ ingester:
   source_dir: "C:/path/to/incoming_data"
   target_tree: "C:/path/to/company_tree"
   branches: ["Branch_A", "Branch_B", "Branch_C"]
+
   # The root folder for all reports (e.g., "All Branches reports")
   report_root: "reports"
+
   # Specific report folders mapping -> [match strings]
+  # =========================================================================
+  # REPORT ROUTING RULES (Top-Down Priority)
+  # =========================================================================
+  # Python evaluates these rules from top to bottom and stops at the FIRST match.
+  # CRITICAL: Always place the MOST SPECIFIC match strings at the top.
+  # If a broad rule is placed above a specific rule, the broad rule will
+  # incorrectly capture files meant for the specific folder.
   report_types:
+    # 1. HIGHEST PRIORITY (Highly specific strings)
+    # This will immediately capture files like "Report_5.7.1_Special.zip".
+    # Because it is at the top, it prevents the general "5.7.1" rule below from stealing it.
+    "Special Reports Folder": ["5.7.1 Special", "5.7.1_Special"]
+
+    # 2. MEDIUM PRIORITY (Broad catch-all strings)
+    # This will catch all remaining "5.7.1" files that did NOT match the specific rule above.
+    # Note: Always include both Cyrillic and Latin variations if human error is possible.
+    "General Reports Folder": ["5.7.1", "GR"]
+
+    # 3. OTHER DISTINCT REPORTS (No overlap risk)
+    # These strings do not overlap with the ones above, so their exact order matters less.
     "headcount_summary": ["HC", "summary"]
-    "status": ["Status"]
+
   log_file: "ingester.log"
