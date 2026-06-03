@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from datetime import datetime
 import zipfile
 import re
@@ -97,9 +98,26 @@ class ArchiveIngester(BasePlugin):
 
             self.logger.info(f"Extracting {zip_path.name} -> {dest_dir}")
 
+            # 5. UNZIP TO DESTINATION WITH DATE/TIME PRESERVATION
             try:
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(dest_dir)
+                    # Iterate through each file inside the archive to preserve original timestamps
+                    for zip_info in zip_ref.infolist():
+
+                        # Extract the file to the destination directory
+                        extracted_path = zip_ref.extract(zip_info, dest_dir)
+
+                        # Retrieve the original date tuple from the archive metadata
+                        # Format: (year, month, day, hour, minute, second)
+                        date_time = zip_info.date_time
+
+                        # Convert the tuple into a system-readable timestamp
+                        dt = datetime(*date_time)
+                        timestamp = time.mktime(dt.timetuple())
+
+                        # Forcibly apply the original access and modification times to the newly extracted file
+                        os.utime(extracted_path, (timestamp, timestamp))
+
             except zipfile.BadZipFile:
                 self.logger.error(f"Error: Corrupted archive -> {zip_path.name}")
 
