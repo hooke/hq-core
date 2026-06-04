@@ -30,3 +30,58 @@ ingester:
     "headcount_summary": ["HC", "summary"]
 
   log_file: "ingester.log"
+
+# =========================================================================
+# GENERATOR PIPELINE RULES
+# =========================================================================
+# The Generator orchestrates the creation of new reporting periods.
+# Flow:
+# 1. Creates a new date folder for the specified report type.
+# 2. Copies historical files from the previous reporting period.
+# 3. Injects externally updated files from the 'external_inputs_dir'.
+# 4. Updates the date and refreshes data links inside 'constants_file'
+#    and specific target files using xlwings.
+generator:
+  log_file: "generator.log"
+  target_date: "current"
+  target_tree: "C:/path/to/company_tree"
+  hq_branch: "HQ_51"
+  reports_group: "reports"
+  external_inputs_dir: "external_inputs"
+  # =========================================================================
+  # REPORT GENERATION & SCHEDULING RULES
+  # =========================================================================
+  # The 'schedule' block defines the exact temporal logic for the generator.
+  # Valid frequencies: "daily", "weekly", "monthly", "quarterly", "exact_dates"
+  report_types:
+    "Sales daily":
+      schedule:
+        frequency: "daily"
+      external_files_to_copy: ["CRM_report.xlsx"]
+      target_files_to_update: ["Sales_daily.xlsx"]
+
+    "Marketing Performance report":
+      schedule:
+        frequency: "weekly"
+        days_of_week: ["Monday", "Thursday"] # Can accept multiple days
+      external_files_to_copy: ["./GA/GA_export.xlsx", "/ads/Ads_res.xlsx"]
+      target_files_to_update: ["MarketingPerf_rep.xlsx"]
+
+    "Financial report":
+      schedule:
+        frequency: "monthly"
+        days_of_month: [1, 15] # Runs on the 1st and 15th of the month
+      external_files_to_copy: ["../fin/Accounts.xlsx"]
+      target_files_to_update: ["Finance.xlsx"]
+
+    "Board report":
+      schedule:
+        frequency: "exact_dates"
+        dates: ["24.08.2026", "14.11.2026"] # Hardcoded target dates
+      target_files_to_update: ["Board.xlsx"]
+
+# Excel Manipulation Rules
+  show_excel: true
+  constants_file: "constants.xlsx"
+  constants_sheet: "Constants"   # The exact name of the tab
+  constants_date_cell: "$A$2"         # The exact cell reference
