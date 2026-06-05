@@ -16,18 +16,18 @@ ingester:
   # incorrectly capture files meant for the specific folder.
   report_types:
     # 1. HIGHEST PRIORITY (Highly specific strings)
-    # This will immediately capture files like "Report_5.7.1_Special.zip".
+    # This will immediately capture files like "Report_5.7.1_Weekly.zip".
     # Because it is at the top, it prevents the general "5.7.1" rule below from stealing it.
-    "Special Reports Folder": ["5.7.1 Special", "5.7.1_Special"]
+    "Sales Weekly": ["5.7.1 Weekly", "5.7.1_Weekly"]
 
     # 2. MEDIUM PRIORITY (Broad catch-all strings)
     # This will catch all remaining "5.7.1" files that did NOT match the specific rule above.
     # Note: Always include both Cyrillic and Latin variations if human error is possible.
-    "General Reports Folder": ["5.7.1", "GR"]
+    "Sales Daily": ["5.7.1", "Sales_daily"]
 
     # 3. OTHER DISTINCT REPORTS (No overlap risk)
     # These strings do not overlap with the ones above, so their exact order matters less.
-    "headcount_summary": ["HC", "summary"]
+    "headcount_summary": ["HC", "headcount", "head_summary"]
 
   log_file: "ingester.log"
 
@@ -58,26 +58,26 @@ generator:
       schedule:
         frequency: "daily"
       external_files_to_copy: ["CRM_report.xlsx"]
-      target_files_to_update: ["Sales_daily.xlsx"]
+      target_files_to_update: ["5.7.1_Sales_daily.xlsx"]
 
-    "Marketing Performance report":
+    "Sales weekly":
       schedule:
         frequency: "weekly"
         days_of_week: ["Monday", "Thursday"] # Can accept multiple days
-      external_files_to_copy: ["./GA/GA_export.xlsx", "/ads/Ads_res.xlsx"]
-      target_files_to_update: ["MarketingPerf_rep.xlsx"]
+      external_files_to_copy: ["CRM_report_weekly.xlsx"]
+      target_files_to_update: ["5.7.1_Sales_weekly.xlsx"]
 
-    "Financial report":
+    "Headcount summary":
       schedule:
         frequency: "monthly"
         days_of_month: [1, 15] # Runs on the 1st and 15th of the month
-      external_files_to_copy: ["../fin/Accounts.xlsx"]
-      target_files_to_update: ["Finance.xlsx"]
+      external_files_to_copy: ["../HR/headcount.xlsx"]
+      target_files_to_update: ["Headcount_monthly.xlsx"]
 
     "Board report":
       schedule:
         frequency: "exact_dates"
-        dates: ["24.08.2026", "14.11.2026"] # Hardcoded target dates
+        dates: ["24.07.2026", "14.11.2026"] # Hardcoded target dates
       target_files_to_update: ["Board.xlsx"]
 
 # Excel Manipulation Rules
@@ -85,3 +85,23 @@ generator:
   constants_file: "constants.xlsx"
   constants_sheet: "Constants"   # The exact name of the tab
   constants_date_cell: "$A$2"         # The exact cell reference
+
+# =========================================================================
+# AGGREGATOR PIPELINE RULES (MVP)
+# =========================================================================
+aggregator:
+  log_file: "aggregator.log"
+  target_date: "current"
+  target_tree: "C:/path/to/company_tree" # We will unify this later!
+  
+  # Structural logic
+  branches: ["Branch_A", "Branch_B", "Branch_C"]
+  total_node: "total" # Or whatever your 'Total Company' folder is called
+  reports_group: "reports"
+  show_excel: true
+  
+    "Sales daily":
+      target_files_to_update: ["5.7.1_Sales_daily.xlsx"]
+
+    "Sales weekly":
+      target_files_to_update: ["5.7.1_Sales_weekly.xlsx"]
