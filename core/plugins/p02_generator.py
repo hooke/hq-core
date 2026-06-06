@@ -105,6 +105,49 @@ class Generator:
         date_folders.sort(key=lambda x: x[0], reverse=True)
         return date_folders[0][1]
 
+    def _safe_save(self, wb, save_path=None, file_name=""):
+        """Attempts to save the workbook. Pauses and prompts the user if the file is locked."""
+        while True:
+            try:
+                if save_path:
+                    wb.save(save_path)
+                else:
+                    wb.save()
+                return True
+            except PermissionError:
+                # Catches native Python I/O locks
+                print(f"\n[⚠️  FILE LOCKED] Windows cannot save '{file_name}'.")
+                print("    It is currently open in Excel or locked by another process.")
+                input(
+                    "    -> Please close the file, then press [ENTER] here to retry..."
+                )
+            except Exception as e:
+                error_str = str(e)
+                # Catches Microsoft Excel COM locks (-2146827284 / 0x800A03EC)
+                if "Cannot access" in error_str or "-2146827284" in error_str:
+                    print(f"\n[⚠️  FILE LOCKED] Excel cannot overwrite '{file_name}'.")
+                    print(
+                        "    The destination file is currently open in another window."
+                    )
+                    input("    -> Please close it, then press [ENTER] here to retry...")
+                else:
+                    self.logger.error(f"  Unexpected error saving {file_name}: {e}")
+                    return False
+
+    def _safe_copy(self, src, dst, file_name=""):
+        """Attempts to copy a file safely. Pauses if the destination is locked."""
+        while True:
+            try:
+                shutil.copy2(src, dst)
+                return True
+            except PermissionError:
+                print(f"\n[⚠️  FILE LOCKED] Windows cannot overwrite '{file_name}'.")
+                print("    The destination file is currently open in Excel.")
+                input("    -> Please close it, then press [ENTER] here to retry...")
+            except Exception as e:
+                self.logger.error(f"  Unexpected error copying {file_name}: {e}")
+                return False
+
     def run(self):
         self.logger.info(
             f"--- Starting Generation Cycle for {self.target_date_str} ---"
@@ -149,7 +192,10 @@ class Generator:
             if response.strip().lower() not in ["n", "no"]:
                 for item in prev_dir.iterdir():
                     if item.is_file():
-                        shutil.copy2(item, report_dir / item.name)
+                        self._safe_copy(
+                            item, report_dir / item.name, file_name=item.name
+                        )
+
                 self.logger.info(f"  Copied historical files from {rel_prev}")
             else:
                 self.logger.info("  Skipped historical files based on user input.")
@@ -161,9 +207,10 @@ class Generator:
         for file_name in external_files:
             source_path = (self.external_inputs_dir / file_name).resolve()
             dest_path = report_dir / Path(file_name).name
+            input("    -> Please press [ENTER] to continue...")
 
             if source_path.exists():
-                shutil.copy2(source_path, dest_path)
+                self._safe_copy(source_path, dest_path)
                 self.logger.info(f"  Copied external input: {file_name}")
             else:
                 self.logger.warning(f"  MISSING external input file: {source_path}")
@@ -214,8 +261,7 @@ class Generator:
 
                     # Force a full formula recalculation
                     app.calculate()
-
-                    wb_const.save()
+                    self._safe_save(wb_const, file_name=self.constants_file)
                     wb_const.close()
                     self.logger.info("  Constants successfully updated and saved.")
                 except Exception as e:
@@ -234,8 +280,7 @@ class Generator:
 
                     # Force recalculation of internal formulas
                     app.calculate()
-
-                    wb_target.save()
+                    self._safe_save(wb_target, file_name=file_name)
                     wb_target.close()
                     self.logger.info(
                         f"  {target_path.name} successfully updated and saved."

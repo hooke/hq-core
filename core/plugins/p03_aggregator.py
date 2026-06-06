@@ -67,6 +67,49 @@ class Aggregator:
         date_folders.sort(key=lambda x: x[0], reverse=True)
         return date_folders[0][1]
 
+    def _safe_save(self, wb, save_path=None, file_name=""):
+        """Attempts to save the workbook. Pauses and prompts the user if the file is locked."""
+        while True:
+            try:
+                if save_path:
+                    wb.save(save_path)
+                else:
+                    wb.save()
+                return True
+            except PermissionError:
+                # Catches native Python I/O locks
+                print(f"\n[⚠️  FILE LOCKED] Windows cannot save '{file_name}'.")
+                print("    It is currently open in Excel or locked by another process.")
+                input(
+                    "    -> Please close the file, then press [ENTER] here to retry..."
+                )
+            except Exception as e:
+                error_str = str(e)
+                # Catches Microsoft Excel COM locks (-2146827284 / 0x800A03EC)
+                if "Cannot access" in error_str or "-2146827284" in error_str:
+                    print(f"\n[⚠️  FILE LOCKED] Excel cannot overwrite '{file_name}'.")
+                    print(
+                        "    The destination file is currently open in another window."
+                    )
+                    input("    -> Please close it, then press [ENTER] here to retry...")
+                else:
+                    self.logger.error(f"  Unexpected error saving {file_name}: {e}")
+                    return False
+
+    def _safe_copy(self, src, dst, file_name=""):
+        """Attempts to copy a file safely. Pauses if the destination is locked."""
+        while True:
+            try:
+                shutil.copy2(src, dst)
+                return True
+            except PermissionError:
+                print(f"\n[⚠️  FILE LOCKED] Windows cannot overwrite '{file_name}'.")
+                print("    The destination file is currently open in Excel.")
+                input("    -> Please close it, then press [ENTER] here to retry...")
+            except Exception as e:
+                self.logger.error(f"  Unexpected error copying {file_name}: {e}")
+                return False
+
     def run(self):
         self.logger.info(
             f"--- Starting Aggregation Cycle for {self.target_date_str} ---"
@@ -100,7 +143,9 @@ class Aggregator:
             if response.strip().lower() not in ["n", "no"]:
                 for item in prev_dir.iterdir():
                     if item.is_file():
-                        shutil.copy2(item, report_dir / item.name)
+                        self._safe_copy(
+                            item, report_dir / item.name, file_name=item.name
+                        )
                 self.logger.info(f"  Copied master files from {rel_prev}")
             else:
                 self.logger.info("  Skipped historical files based on user input.")
@@ -126,7 +171,15 @@ class Aggregator:
 
         with xw.App(visible=self.excel_visible) as app:
             if self.excel_visible:
-                app.activate(steal_focus=True)
+                try:
+                    # Attempt to force Excel to the front
+                    app.activate(steal_focus=True)
+                except Exception:
+                    # If it's a headless/zombie process, ignore the UI error and keep working
+                    self.logger.warning(
+                        "  Could not steal Windows focus. Excel will process in the background."
+                    )
+
             app.display_alerts = False
 
             for file_name in target_files:
@@ -165,14 +218,14 @@ class Aggregator:
                                             f"    Cannot update link! Source file missing: {new_link}"
                                         )
 
+                    # Force calculation now that links are updated
                     app.calculate()
 
-                    # 1. Save the Master File (with live formulas)
-                    wb_target.save()
+                    # 1. Save the Master File safely
+                    self._safe_save(wb_target, file_name=target_path.name)
                     self.logger.info(f"  {target_path.name} master aggregation saved.")
 
                     # 2. Handle Step 4: Create Flat "Values-Only" Copy
-                    # I assumed you meant YYYY.MM.DD based on your standard format
                     flat_name = f"{target_path.stem} - {self.folder_year}.{self.folder_month}.{self.folder_day}{target_path.suffix}"
                     flat_path = report_dir / flat_name
 
@@ -180,18 +233,18 @@ class Aggregator:
                         f"  Creating flattened values-only copy: {flat_name}"
                     )
 
-                    # Save-As to create the new file
-                    wb_target.save(flat_path)
+                    # Save-As safely
+                    self._safe_save(wb_target, save_path=flat_path, file_name=flat_name)
 
-                    # Loop through all sheets and overwrite formulas with their calculated values
+                    # Overwrite formulas with values
                     for sheet in wb_target.sheets:
                         used_range = sheet.used_range
                         if used_range.address != "$A$1" or used_range.value is not None:
                             # Setting value = value instantly kills formulas
                             used_range.value = used_range.value
 
-                    # Save the flat file and close
-                    wb_target.save()
+                    # Save the flat file safely and close
+                    self._safe_save(wb_target, file_name=flat_name)
                     wb_target.close()
                     self.logger.info(f"  Values-only copy successfully generated.")
 
