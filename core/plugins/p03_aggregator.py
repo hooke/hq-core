@@ -135,10 +135,11 @@ class Aggregator:
             rel_prev = prev_dir.relative_to(self.target_tree)
             rel_target = report_dir.relative_to(self.target_tree)
 
-            print(f"\n[?] FOUND PREVIOUS MASTER AGGREGATOR: {report_name}")
-            print(f"    Source:      {rel_prev}")
-            print(f"    Destination: {rel_target}")
-            response = input(f"    Copy master file to today's folder? [Y/n]: ")
+            print(f"\n[?] FOUND PREVIOUS MASTER AGGREGATION: {report_name}")
+            print(f"    Source: {rel_prev}")
+            response = input(
+                f"    Copy to target destination ({self.target_date_str})? [Y/n]: "
+            )
 
             if response.strip().lower() not in ["n", "no"]:
                 for item in prev_dir.iterdir():
@@ -146,12 +147,12 @@ class Aggregator:
                         self._safe_copy(
                             item, report_dir / item.name, file_name=item.name
                         )
-                self.logger.info(f"  Copied master files from {rel_prev}")
+                self.logger.info(f"  Copied previous master files from {rel_prev}")
             else:
-                self.logger.info("  Skipped historical files based on user input.")
+                self.logger.info("  Skipped previous master files based on user input.")
         else:
             self.logger.warning(
-                "  No previous master report found! Aggregation may fail if templates are missing."
+                "  No previous master files found! Aggregation may fail if templates are missing."
             )
 
         # 2. Mutate Excel Links
@@ -207,9 +208,14 @@ class Aggregator:
 
                                 if old_link != new_link:
                                     if Path(new_link).exists():
-                                        self.logger.info(
-                                            f"    Mutating Link: ...{Path(new_link).parent.name}"
+                                        # Grabs the last 8 parts of the path (e.g., "HQ/Branch/Reports/Report/2026/06/04/file.name")
+                                        short_path = "\\".join(
+                                            Path(new_link).parts[-8:]
                                         )
+                                        self.logger.info(
+                                            f"    Mutating Link -> ...\\{short_path}"
+                                        )
+
                                         wb_target.api.ChangeLink(
                                             Name=old_link, NewName=new_link, Type=1
                                         )
@@ -246,7 +252,7 @@ class Aggregator:
                     # Save the flat file safely and close
                     self._safe_save(wb_target, file_name=flat_name)
                     wb_target.close()
-                    self.logger.info(f"  Values-only copy successfully generated.")
+                    self.logger.info("  Values-only copy successfully generated.")
 
                 except Exception as e:
                     self.logger.error(
