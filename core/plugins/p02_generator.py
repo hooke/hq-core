@@ -176,53 +176,93 @@ class Generator:
         # DRY Fix: Create the target directory ONCE at the very beginning
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Handle Historical Files Copy
+        # 1. Recursive Historical Copy (Handles nested folders)
         prev_dir = self._find_previous_report_dir(report_base_dir)
         if prev_dir:
-            # Format clean relative paths starting from the HQ branch
             rel_prev = prev_dir.relative_to(self.target_tree)
-            rel_target = report_dir.relative_to(self.target_tree)
-
-            # Interactive Terminal Prompt
-            print(f"\n[?] FOUND PREVIOUS REPORT: {report_name}")
-            print(f"    Source:      {rel_prev}")
-            print(f"    Destination: {rel_target}")
-            response = input("    Copy all files from source to destination? [Y/n]: ")
+            print(f"\n[?] FOUND PREVIOUS REPORT GENERATION: {report_name}")
+            print(f"    Source: {rel_prev}")
+            response = input(
+                f"    Copy to target destination ({self.target_date_str})? [Y/n]: "
+            )
 
             if response.strip().lower() not in ["n", "no"]:
-                for item in prev_dir.iterdir():
+                # Use rglob to recursively grab all files in subfolders
+                for item in prev_dir.rglob("*"):
                     if item.is_file():
-                        self._safe_copy(
-                            item, report_dir / item.name, file_name=item.name
-                        )
-
-                self.logger.info(f"  Copied historical files from {rel_prev}")
+                        rel_path = item.relative_to(prev_dir)
+                        dst_path = report_dir / rel_path
+                        dst_path.parent.mkdir(parents=True, exist_ok=True)
+                        self._safe_copy(item, dst_path, file_name=item.name)
+                self.logger.info(f"  Copied previous report files from {rel_prev}")
             else:
-                self.logger.info("  Skipped historical files based on user input.")
+                self.logger.warning(
+                    "  Skipped previous report files based on user input."
+                )
         else:
-            self.logger.info("  No previous report found to copy.")
+            self.logger.warning(
+                "  No previous report files found! Generation may fail if templates are missing."
+            )
 
-        # 2. Inject External Manual Files
-        external_files = rules.get("external_files_to_copy", [])
-        for file_name in external_files:
-            source_path = (self.external_inputs_dir / file_name).resolve()
-            dest_path = report_dir / Path(file_name).name
-            input("    -> Please press [ENTER] to continue...")
-
-            if source_path.exists():
-                self._safe_copy(source_path, dest_path)
-                self.logger.info(f"  Copied external input: {file_name}")
+        # 2. Copy Standard External Inputs
+        ext_files = rules.get("external_files_to_copy", [])
+        for file_name in ext_files:
+            src_file = self.external_inputs_dir / file_name
+            if src_file.exists():
+                self._safe_copy(
+                    src_file, report_dir / src_file.name, file_name=src_file.name
+                )
+                self.logger.info(f"  Copied external input: {src_file}")
             else:
-                self.logger.warning(f"  MISSING external input file: {source_path}")
+                self.logger.warning(f"  External input missing: {src_file}")
 
-        # 3. Trigger Excel modifications
+        # 3. Handle Special Conditional Routing (e.g., 1st of month fallback)
+        special_files = rules.get("special_files", [])
+        for sf in special_files:
+            target_path = report_dir / sf["target_path"]
+            # If historical copy didn't bring it over, trigger fallback
+            if not target_path.exists():
+                if sf.get("date_rule") == "first_of_month":
+                    fallback_date = self.target_datetime.replace(day=1)
+                else:
+                    fallback_date = self.target_datetime
+
+                alt_dir = (
+                    self.target_tree
+                    / self.hq_branch
+                    / sf["fallback_group"]
+                    / sf["fallback_report"]
+                    / fallback_date.strftime("%Y")
+                    / fallback_date.strftime("%m")
+                    / fallback_date.strftime("%d")
+                )
+                src_file = alt_dir / sf["fallback_file"]
+
+                if src_file.exists():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    self._safe_copy(src_file, target_path, file_name=src_file.name)
+                    self.logger.info(
+                        f"  Routed special fallback file to {sf['target_path']}"
+                    )
+                else:
+                    self.logger.warning(f"  Special fallback missing at: {src_file}")
+
+        # 4. Trigger Priority-Tiered Excel Engine
         self._update_excel_links(report_dir, rules)
 
     def _update_excel_links(self, report_dir, rules):
-        target_files = rules.get("target_files_to_update", [])
-        constants_path = report_dir / self.constants_file
+        update_sequence = rules.get("update_sequence", [])
+        legacy_targets = rules.get("target_files_to_update", [])
 
-        if not target_files and not constants_path.exists():
+        # Automatically fall back to global constants config unless explicitly overridden
+        constants_cfg = rules.get("constants", {})
+        const_file_name = constants_cfg.get("file", self.constants_file)
+        const_sheet = constants_cfg.get("sheet", self.constants_sheet)
+        const_date_cell = constants_cfg.get("date_cell", self.constants_date_cell)
+
+        const_file = report_dir / const_file_name
+
+        if not const_file.exists() and not update_sequence and not legacy_targets:
             return
 
         self.logger.info(f"  Starting xlwings engine. Visible={self.excel_visible}")
@@ -237,58 +277,56 @@ class Generator:
                     self.logger.warning(
                         "  Could not steal Windows focus. Excel will process in the background."
                     )
+            app.display_alerts = False
 
-            # -------------------------------------------------------------
-            # 1. PROCESS CONSTANTS FILE
-            # -------------------------------------------------------------
-            if constants_path.exists():
-                self.logger.info(f"  Injecting date into {self.constants_file}")
+            # --- PRIORITY 1: CONSTANTS ---
+            # Automatically runs if the file exists in the folder, maintaining backward compatibility
+            if const_file.exists():
+                self.logger.info(
+                    f"  [Priority 1] Updating Constants: {const_file.name}"
+                )
                 try:
-                    # Open WITHOUT updating links to prevent old-date data pulls
-                    wb_const = app.books.open(constants_path, update_links=False)
-                    sheet = wb_const.sheets[self.constants_sheet]
+                    wb_const = app.books.open(const_file, update_links=False)
+                    wb_const.sheets[const_sheet].range(
+                        const_date_cell
+                    ).value = self.target_datetime
 
-                    # Inject the native Python date object
-                    sheet.range(
-                        self.constants_date_cell
-                    ).value = self.target_datetime.date()
-
-                    # Ask the native Windows COM API for all external link sources
-                    links = wb_const.api.LinkSources()
+                    links = wb_const.api.LinkSources(1)
                     if links:
-                        self.logger.info(
-                            "  Refreshing external links in constants file..."
-                        )
                         for link in links:
                             wb_const.api.UpdateLink(Name=link)
 
-                    # Force a full formula recalculation
                     app.calculate()
-                    self._safe_save(wb_const, file_name=self.constants_file)
+                    self._safe_save(wb_const, file_name=const_file.name)
                     wb_const.close()
-                    self.logger.info("  Constants successfully updated and saved.")
                 except Exception as e:
-                    self.logger.error(f"  Failed to process constants file: {e}")
+                    self.logger.error(f"  Failed to process constants: {e}")
 
-            # -------------------------------------------------------------
-            # 2. PROCESS TARGET FILES
-            # -------------------------------------------------------------
-            for file_name in target_files:
-                target_path = report_dir / file_name
-                self.logger.info(f"  Processing target file: {target_path.name}")
-                try:
-                    # We open these WITH link updates enabled, so they immediately
-                    # pull the fresh data from the constants file we just saved.
-                    wb_target = app.books.open(target_path, update_links=True)
+            # --- PRIORITY TIERS: INTERMEDIATES & TARGETS ---
+            tiers = update_sequence if update_sequence else [legacy_targets]
 
-                    # Force recalculation of internal formulas
-                    app.calculate()
-                    self._safe_save(wb_target, file_name=file_name)
-                    wb_target.close()
+            for tier_idx, file_group in enumerate(tiers, start=2):
+                if not file_group:
+                    continue
+                self.logger.info(
+                    f"  [Priority {tier_idx}] Executing Tier Update Sequence..."
+                )
+
+                for file_name in file_group:
+                    target_path = report_dir / file_name
+                    if not target_path.exists():
+                        self.logger.warning(f"  Missing file in sequence: {file_name}")
+                        continue
+
                     self.logger.info(
-                        f"  {target_path.name} successfully updated and saved."
+                        f"    -> Updating links & calculating: {target_path.name}"
                     )
-                except Exception as e:
-                    self.logger.error(
-                        f"  Failed to process target file {target_path.name}: {e}"
-                    )
+                    try:
+                        wb_target = app.books.open(target_path, update_links=True)
+                        app.calculate()
+                        self._safe_save(wb_target, file_name=target_path.name)
+                        wb_target.close()
+                    except Exception as e:
+                        self.logger.error(
+                            f"    Failed to process {target_path.name}: {e}"
+                        )
