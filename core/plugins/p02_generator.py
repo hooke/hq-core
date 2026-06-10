@@ -187,7 +187,7 @@ class Generator:
             print(f"\n[?] FOUND PREVIOUS REPORT: {report_name}")
             print(f"    Source:      {rel_prev}")
             print(f"    Destination: {rel_target}")
-            response = input(f"    Copy all files from source to destination? [Y/n]: ")
+            response = input("    Copy all files from source to destination? [Y/n]: ")
 
             if response.strip().lower() not in ["n", "no"]:
                 for item in prev_dir.iterdir():
@@ -228,12 +228,15 @@ class Generator:
         self.logger.info(f"  Starting xlwings engine. Visible={self.excel_visible}")
 
         with xw.App(visible=self.excel_visible) as app:
-
             if self.excel_visible:
-                # Force Windows to bring the Excel application to the absolute front
-                app.activate(steal_focus=True)
-            # CRITICAL: Suppress all Windows/Excel pop-ups
-            app.display_alerts = False
+                try:
+                    # Attempt to force Excel to the front
+                    app.activate(steal_focus=True)
+                except Exception:
+                    # If it's a headless/zombie process, ignore the UI error and keep working
+                    self.logger.warning(
+                        "  Could not steal Windows focus. Excel will process in the background."
+                    )
 
             # -------------------------------------------------------------
             # 1. PROCESS CONSTANTS FILE
@@ -246,9 +249,9 @@ class Generator:
                     sheet = wb_const.sheets[self.constants_sheet]
 
                     # Inject the native Python date object
-                    sheet.range(self.constants_date_cell).value = (
-                        self.target_datetime.date()
-                    )
+                    sheet.range(
+                        self.constants_date_cell
+                    ).value = self.target_datetime.date()
 
                     # Ask the native Windows COM API for all external link sources
                     links = wb_const.api.LinkSources()
