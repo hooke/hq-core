@@ -20,6 +20,9 @@ class Aggregator:
 
         self.report_types = self.config.get("report_types", {})
         self.excel_visible = self.config.get("show_excel", True)
+        # Link path mutation settings (Fallback to None if not present)
+        self.path_replace_from = self.config.get("path_replace_from", None)
+        self.path_replace_to = self.config.get("path_replace_to", None)
 
         self._setup_dates()
         self._setup_logging()
@@ -196,6 +199,9 @@ class Aggregator:
 
                     if links:
                         for old_link in links:
+                            new_link = old_link
+
+                            # 1. Date Pattern Mutation
                             match = date_pattern.search(old_link)
                             if match:
                                 old_date_str = match.group()
@@ -204,25 +210,33 @@ class Aggregator:
                                 new_date_str = f"{sep}{self.folder_year}{sep}{self.folder_month}{sep}{self.folder_day}{sep}"
 
                                 # Use literal string replacement to avoid regex escape crashes
-                                new_link = old_link.replace(old_date_str, new_date_str)
+                                new_link = new_link.replace(old_date_str, new_date_str)
 
-                                if old_link != new_link:
-                                    if Path(new_link).exists():
-                                        # Grabs the last 8 parts of the path (e.g., "HQ/Branch/Reports/Report/2026/06/04/file.name")
-                                        short_path = "\\".join(
-                                            Path(new_link).parts[-8:]
-                                        )
-                                        self.logger.info(
-                                            f"    Mutating Link -> ...\\{short_path}"
-                                        )
+                            # 2. Configured Folder String Mutation (e.g., Company.TEST -> Company)
+                            if (
+                                self.path_replace_from
+                                and self.path_replace_to is not None
+                            ):
+                                new_link = new_link.replace(
+                                    self.path_replace_from, self.path_replace_to
+                                )
 
-                                        wb_target.api.ChangeLink(
-                                            Name=old_link, NewName=new_link, Type=1
-                                        )
-                                    else:
-                                        self.logger.warning(
-                                            f"    Cannot update link! Source file missing: {new_link}"
-                                        )
+                            # 3. Apply ChangeLink if any mutation occurred
+                            if old_link != new_link:
+                                if Path(new_link).exists():
+                                    # Grabs the last 8 parts of the path (e.g., "HQ/Branch/Reports/Report/2026/06/04/file.name")
+                                    short_path = "\\".join(Path(new_link).parts[-8:])
+                                    self.logger.info(
+                                        f"    Mutating Link -> ...\\{short_path}"
+                                    )
+
+                                    wb_target.api.ChangeLink(
+                                        Name=old_link, NewName=new_link, Type=1
+                                    )
+                                else:
+                                    self.logger.warning(
+                                        f"    Cannot update link! Source file missing: {new_link}"
+                                    )
 
                     # Force calculation now that links are updated
                     app.calculate()
