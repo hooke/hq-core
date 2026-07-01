@@ -1,6 +1,5 @@
 import logging
 import shutil
-import re
 from pathlib import Path
 from datetime import datetime
 import xlwings as xw
@@ -136,7 +135,6 @@ class Aggregator:
         prev_dir = self._find_previous_report_dir(report_base_dir)
         if prev_dir:
             rel_prev = prev_dir.relative_to(self.target_tree)
-            rel_target = report_dir.relative_to(self.target_tree)
 
             print(f"\n[?] FOUND PREVIOUS MASTER AGGREGATION: {report_name}")
             print(f"    Source: {rel_prev}")
@@ -159,9 +157,9 @@ class Aggregator:
             )
 
         # 2. Mutate Excel Links
-        self._mutate_excel_links(report_dir, rules)
+        self._mutate_excel_links(report_dir, report_name, rules)
 
-    def _mutate_excel_links(self, report_dir, rules):
+    def _mutate_excel_links(self, report_dir, report_name, rules):
         target_files = rules.get("target_files_to_update", [])
         if not target_files:
             return
@@ -169,9 +167,6 @@ class Aggregator:
         self.logger.info(
             f"  Starting xlwings link mutation engine. Visible={self.excel_visible}"
         )
-
-        # Regex to precisely find the date folder segment in the path
-        date_pattern = re.compile(r"[\\/]\d{4}[\\/]\d{2}[\\/]\d{2}[\\/]")
 
         with xw.App(visible=self.excel_visible) as app:
             if self.excel_visible:
@@ -199,27 +194,41 @@ class Aggregator:
 
                     if links:
                         for old_link in links:
-                            new_link = old_link
+                            # 1. Identify which branch this link belongs to
+                            target_branch = None
+                            for branch in self.branches:
+                                # Look for \Branch\ or /Branch/ in the old legacy link
+                                if (
+                                    f"\\{branch}\\" in old_link
+                                    or f"/{branch}/" in old_link
+                                ):
+                                    target_branch = branch
+                                    break
 
-                            # 1. Date Pattern Mutation
-                            match = date_pattern.search(old_link)
-                            if match:
-                                old_date_str = match.group()
-                                # Grab the slash type (\ or /) from the original link
-                                sep = old_date_str[0]
-                                new_date_str = f"{sep}{self.folder_year}{sep}{self.folder_month}{sep}{self.folder_day}{sep}"
-
-                                # Use literal string replacement to avoid regex escape crashes
-                                new_link = new_link.replace(old_date_str, new_date_str)
-
-                            # 2. Configured Folder String Mutation (e.g., Company.TEST -> Company)
-                            if (
-                                self.path_replace_from
-                                and self.path_replace_to is not None
-                            ):
-                                new_link = new_link.replace(
-                                    self.path_replace_from, self.path_replace_to
+                            # If we can't identify the branch, fallback to the old mutation logic
+                            if not target_branch:
+                                self.logger.warning(
+                                    f"    Could not identify branch in link: {old_link}"
                                 )
+                                continue
+
+                            # 2. Extract the target file name
+                            target_file_name = Path(old_link).name
+
+                            # 3. Dynamically reconstruct the pristine absolute path using our rigid structure
+                            # target_tree is already absolute: e.g., F:\A0807\04_WORKPLACE\Company
+                            new_link_path = (
+                                self.target_tree
+                                / target_branch
+                                / self.reports_group
+                                / report_name
+                                / self.folder_year
+                                / self.folder_month
+                                / self.folder_day
+                                / target_file_name
+                            ).resolve()
+
+                            new_link = str(new_link_path)
 
                             # 3. Apply ChangeLink if any mutation occurred
                             if old_link != new_link:
