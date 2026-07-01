@@ -74,6 +74,8 @@ class Generator:
             )
         if freq == "monthly":
             return self.target_datetime.day in schedule_config.get("days_of_month", [])
+        if freq == "quarterly":
+            return self.target_datetime.day in schedule_config.get("days_of_month", [])
         if freq == "exact_dates":
             return self.target_date_str in schedule_config.get("dates", [])
 
