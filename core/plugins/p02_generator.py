@@ -13,17 +13,20 @@ class Generator:
         self.target_tree = Path(
             self.config.get("target_tree", "./company_tree")
         ).resolve()
-        self.hq_branch = self.config.get("hq_branch", "HQ_51")
+        # Support old variable 'hq_branch' and new array 'branches'
+        legacy_hq = self.config.get("hq_branch", "HQ_51")
+        raw_branches = self.config.get("branches", legacy_hq)
+        self.branches = (
+            raw_branches if isinstance(raw_branches, list) else [raw_branches]
+        )
+
         self.reports_group = self.config.get("reports_group", "reports")
 
-        # Branch-specific relative path resolution
-        hq_path = self.target_tree / self.hq_branch
-
         # Strip leading slashes to prevent pathlib from treating it as a root C:/ path
-        raw_ext_dir = self.config.get("external_inputs_dir", "external_inputs").lstrip(
-            "/"
-        )
-        self.external_inputs_dir = (hq_path / raw_ext_dir).resolve()
+        # Save only relative path. Absolute path will be dynamically created for every  branch.
+        self.raw_ext_dir = self.config.get(
+            "external_inputs_dir", "external_inputs"
+        ).lstrip("/")
 
         # 2. Excel & Data Rules
         self.constants_file = self.config.get("constants_file", "constants.xlsx")
@@ -164,13 +167,12 @@ class Generator:
                 )
                 continue
 
-            self.logger.info(f"Processing '{report_name}'...")
-            self._process_report(report_name, rules)
+            for branch in self.branches:
+                self.logger.info(f"Processing '{report_name}' for '{branch}'...")
+                self._process_report(branch, report_name, rules)
 
-    def _process_report(self, report_name, rules):
-        report_base_dir = (
-            self.target_tree / self.hq_branch / self.reports_group / report_name
-        )
+    def _process_report(self, branch, report_name, rules):
+        report_base_dir = self.target_tree / branch / self.reports_group / report_name
         report_dir = (
             report_base_dir / self.folder_year / self.folder_month / self.folder_day
         )
@@ -206,10 +208,11 @@ class Generator:
                 "  No previous report files found! Generation may fail if templates are missing."
             )
 
-        # 2. Copy Standard External Inputs
+        # 2. Copy Standard External Inputs (Look in the current branch dir)
+        branch_ext_dir = (self.target_tree / branch / self.raw_ext_dir).resolve()
         ext_files = rules.get("external_files_to_copy", [])
         for file_name in ext_files:
-            src_file = self.external_inputs_dir / file_name
+            src_file = branch_ext_dir / file_name
             if src_file.exists():
                 self._safe_copy(
                     src_file, report_dir / src_file.name, file_name=src_file.name
@@ -231,7 +234,7 @@ class Generator:
 
                 alt_dir = (
                     self.target_tree
-                    / self.hq_branch
+                    / branch
                     / sf["fallback_group"]
                     / sf["fallback_report"]
                     / fallback_date.strftime("%Y")
