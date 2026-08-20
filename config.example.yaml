@@ -139,9 +139,6 @@ aggregator:
   total_node: "total" # Or whatever your 'Total Company' folder is called
   reports_group: "reports"
   show_excel: true
-  # String replacement for legacy link paths (e.g., migrating out of a test folder)
-  path_replace_from: "Company.TEST"
-  path_replace_to: "Company"
 
   report_types:
     "Sales daily":
