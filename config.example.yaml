@@ -4,7 +4,7 @@ ingester:
   branches: ["Branch_A", "Branch_B", "Branch_C"]
 
   # The root folder for all reports (e.g., "All Branches reports")
-  report_root: "reports"
+  report_group: "reports" # CORRECTED: Replaced legacy 'report_root'
 
   # Specific report folders mapping -> [match strings]
   # =========================================================================
@@ -46,7 +46,8 @@ generator:
   log_file: "generator.log"
   target_date: "current"
   target_tree: "C:/path/to/company_tree"
-  hq_branch: "HQ_51"
+  hq_branch: "HQ_51" # Maintained for legacy fallback
+  branches: ["Branch_A", "Branch_B", "Branch_C"] # ADDED: Required for iteration through many branches
   reports_group: "reports"
   external_inputs_dir: "external_inputs"
   # =========================================================================
@@ -68,44 +69,42 @@ generator:
       external_files_to_copy: ["CRM_report_weekly.xlsx"]
       target_files_to_update: ["5.7.1_Sales_weekly.xlsx"]
 
-      
     "Performance weekly":
-     schedule:
-       frequency: "weekly"
-       days_of_week: ["Friday"] # Can accept multiple days
- 
-     # ARCHITECTURE NOTE: 'update_sequence' vs 'target_files_to_update'
-     # If a report only has simple, independent files to update, use 'target_files_to_update'.
-     # If files depend on each other (e.g., File B needs File A to calculate first),
-     # use 'update_sequence' to define strict priority tiers. 
-     # Note: If 'update_sequence' is present, 'target_files_to_update' is completely ignored.
-     update_sequence:
-       - # Priority 2
-         - "Addendum 1.xlsx"
-         - "Addendum 2.xlsx"
-         - "Addendum 2.1.xlsx"
-         - "Addendum 3.xlsx"
-       - # Priority 3 
-         - "Report 5.7.1"
-         - "Performance Row Report"
-       - # Priority 4 (Final Targets)
-         - "Final Perf Rep.xlsx"
-         - "Perf charts.xlsx"
+      schedule:
+        frequency: "weekly"
+        days_of_week: ["Friday"] # Can accept multiple days
 
-     # Static external files (No COM touch required)
-     external_files_to_copy:
-       - "ga.xlsx"
-       - "CRM_report_weekly.xlsx"
-       - "5.7.1_Sales_weekly.xlsx"
+      # ARCHITECTURE NOTE: 'update_sequence' vs 'target_files_to_update'
+      # If a report only has simple, independent files to update, use 'target_files_to_update'.
+      # If files depend on each other (e.g., File B needs File A to calculate first),
+      # use 'update_sequence' to define strict priority tiers.
+      # Note: If 'update_sequence' is present, 'target_files_to_update' is completely ignored.
+      update_sequence:
+        - # Priority 2
+          - "Addendum 1.xlsx"
+          - "Addendum 2.xlsx"
+          - "Addendum 2.1.xlsx"
+          - "Addendum 3.xlsx"
+        - # Priority 3
+          - "Report 5.7.1"
+          - "Performance Row Report"
+        - # Priority 4 (Final Targets)
+          - "Final Perf Rep.xlsx"
+          - "Perf charts.xlsx"
 
-     # Dynamic Fallback Routing
-     special_files:
-       - target_path: "accounts/accounts.xlsx"
-         fallback_group: "reports"     
-         fallback_report: "Sales daily"
-         fallback_file: "5.7.1_Sales_daily.xlsx"    
-         date_rule: "first_of_month"
+      # Static external files (No COM touch required)
+      external_files_to_copy:
+        - "ga.xlsx"
+        - "CRM_report_weekly.xlsx"
+        - "5.7.1_Sales_weekly.xlsx"
 
+      # Dynamic Fallback Routing
+      special_files:
+        - target_path: "accounts/accounts.xlsx"
+          fallback_group: "reports"
+          fallback_report: "Sales daily"
+          fallback_file: "5.7.1_Sales_daily.xlsx"
+          date_rule: "first_of_month"
 
     "Headcount summary":
       schedule:
@@ -114,17 +113,25 @@ generator:
       external_files_to_copy: ["../HR/headcount.xlsx"]
       target_files_to_update: ["Headcount_monthly.xlsx"]
 
+    "Headcount quarterly":
+      schedule:
+        frequency: "quarterly"
+        # days_of_month can accept multiple days around 1st day of NEXT quarter
+        days_of_month: [30, 31, 1, 2]
+      external_files_to_copy: ["../HR/headcount.xlsx"]
+      target_files_to_update: ["Headcount_quarterly.xlsx"]
+
     "Board report":
       schedule:
         frequency: "exact_dates"
         dates: ["24.07.2026", "14.11.2026"] # Hardcoded target dates
       target_files_to_update: ["Board.xlsx"]
 
-# Excel Manipulation Rules
+  # Excel Manipulation Rules
   show_excel: true
   constants_file: "constants.xlsx"
-  constants_sheet: "Constants"   # The exact name of the tab
-  constants_date_cell: "$A$2"         # The exact cell reference
+  constants_sheet: "Constants" # The exact name of the tab
+  constants_date_cell: "$A$2" # The exact cell reference
 
 # =========================================================================
 # AGGREGATOR PIPELINE RULES (MVP)
@@ -133,7 +140,7 @@ aggregator:
   log_file: "aggregator.log"
   target_date: "current"
   target_tree: "C:/path/to/company_tree" # We will unify this later!
-  
+
   # Structural logic
   branches: ["Branch_A", "Branch_B", "Branch_C"]
   total_node: "total" # Or whatever your 'Total Company' folder is called
