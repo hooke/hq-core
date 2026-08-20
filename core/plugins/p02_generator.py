@@ -210,16 +210,25 @@ class Generator:
 
         # 2. Copy Standard External Inputs (Look in the current branch dir)
         branch_ext_dir = (self.target_tree / branch / self.raw_ext_dir).resolve()
-        ext_files = rules.get("external_files_to_copy", [])
-        for file_name in ext_files:
-            src_file = branch_ext_dir / file_name
-            if src_file.exists():
-                self._safe_copy(
-                    src_file, report_dir / src_file.name, file_name=src_file.name
-                )
-                self.logger.info(f"  Copied external input: {src_file}")
-            else:
-                self.logger.warning(f"  External input missing: {src_file}")
+        print("\n[?] EXTERNAL FILES PROCESSING")
+        print(f"    Source: {branch_ext_dir}")
+        response = input(
+            f"    Copy to target destination ({self.target_date_str})? [Y/n]: "
+        )
+
+        if response.strip().lower() not in ["n", "no"]:
+            ext_files = rules.get("external_files_to_copy", [])
+            for file_name in ext_files:
+                src_file = branch_ext_dir / file_name
+                if src_file.exists():
+                    self._safe_copy(
+                        src_file, report_dir / src_file.name, file_name=src_file.name
+                    )
+                    self.logger.info(f"  Copied external input: {src_file}")
+                else:
+                    self.logger.warning(f"  External input missing: {src_file}")
+        else:
+            self.logger.warning("  Skipped external files based on user input.")
 
         # 3. Handle Special Conditional Routing (e.g., 1st of month fallback)
         special_files = rules.get("special_files", [])
