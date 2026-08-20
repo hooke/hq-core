@@ -246,7 +246,10 @@ class Aggregator:
                                     self.logger.warning(
                                         f"    Cannot update link! Source file missing: {new_link}"
                                     )
-
+                            else:
+                                self.logger.warning(
+                                    f"    Link is already set: {new_link}"
+                                )
                     # Force calculation now that links are updated
                     app.calculate()
 
