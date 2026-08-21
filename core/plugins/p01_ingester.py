@@ -103,8 +103,18 @@ class ArchiveIngester(BasePlugin):
                 with zipfile.ZipFile(zip_path, "r") as zip_ref:
                     # Iterate through each file inside the archive to preserve original timestamps
                     for zip_info in zip_ref.infolist():
+                        # Extract just the file name, ignoring folder paths inside the zip
+                        base_name = os.path.basename(zip_info.filename)
 
-                        # Extract the file to the destination directory
+                        # Skip Microsoft Office lock files and Mac metadata folders
+                        if (
+                            base_name.startswith("~$")
+                            or "__MACOSX" in zip_info.filename
+                        ):
+                            logging.info(f"Skipping temporary/system file: {base_name}")
+                            continue
+
+                        # Safe to extract the file to the destination directory
                         extracted_path = zip_ref.extract(zip_info, dest_dir)
 
                         # Retrieve the original date tuple from the archive metadata
