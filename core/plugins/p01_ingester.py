@@ -41,7 +41,7 @@ class ArchiveIngester(BasePlugin):
         self.logger.info("Starting Incoming archive ingestion process...")
 
         if not self.src_dir.exists():
-            self.logger.error(f"Error: Directory {src_dir} does not exist.")
+            self.logger.error(f"Error: Directory '{self.src_dir}' does not exist.")
             return
 
         # Search for archives like "Branch_51_27.05.zip"
@@ -54,7 +54,7 @@ class ArchiveIngester(BasePlugin):
             )
             if not branch_match:
                 self.logger.debug(
-                    f"Skipped: Unrecognized branch in archive name -> {filename}"
+                    f"Skipped: Unrecognized branch in archive name -> '{filename}'"
                 )
                 continue
 
@@ -68,7 +68,7 @@ class ArchiveIngester(BasePlugin):
                 # Fallback to current month if no date pattern is found
                 month = f"{datetime.now().month:02d}"
                 self.logger.warning(
-                    f"Could not parse date from {filename}. Defaulting to current month: {month}"
+                    f"Could not parse date from '{filename}'. Defaulting to current month: '{month}'"
                 )
 
             # 3. DETERMINE SPECIFIC REPORT FOLDER
@@ -80,7 +80,7 @@ class ArchiveIngester(BasePlugin):
 
             if not specific_report_folder:
                 self.logger.debug(
-                    f"Skipping {filename}: No match strings found for any report type."
+                    f"Skipping '{filename}': No match strings found for any report type."
                 )
                 continue
 
@@ -96,7 +96,7 @@ class ArchiveIngester(BasePlugin):
             )
             dest_dir.mkdir(parents=True, exist_ok=True)
 
-            self.logger.info(f"Extracting {zip_path.name} -> {dest_dir}")
+            self.logger.info(f"Extracting '{zip_path.name}' -> '{dest_dir}'")
 
             # 5. UNZIP TO DESTINATION WITH DATE/TIME PRESERVATION
             try:
@@ -119,6 +119,6 @@ class ArchiveIngester(BasePlugin):
                         os.utime(extracted_path, (timestamp, timestamp))
 
             except zipfile.BadZipFile:
-                self.logger.error(f"Error: Corrupted archive -> {zip_path.name}")
+                self.logger.error(f"Error: Corrupted archive -> '{zip_path.name}'")
 
         self.logger.info("Ingestion completed.")
