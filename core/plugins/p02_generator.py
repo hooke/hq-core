@@ -73,7 +73,16 @@ class Generator:
             return True
         if freq == "weekly":
             return self.target_datetime.strftime("%A") in schedule_config.get(
-                "days_of_week", []
+                "days_of_week",
+                [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday",
+                    "Saturday",
+                    "Sunday",
+                ],
             )
         if freq == "monthly":
             return self.target_datetime.day in schedule_config.get("days_of_month", [])
