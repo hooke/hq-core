@@ -3,6 +3,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import xlwings as xw
+import re
+import time
 
 
 class Aggregator:
@@ -112,6 +114,36 @@ class Aggregator:
                 self.logger.error(f"  Unexpected error copying {file_name}: {e}")
                 return False
 
+    def _update_mcode_path(
+        self, match, mode="full_path", current_dir=None, target_date_str=None
+    ):
+        """
+        Helper method to update the path in M-code based on the processing mode.
+        - 'full_path': Extracts the filename and combines it with current_dir.
+        - 'date_only': Preserves the folder structure but replaces the YYYY\\MM\\DD segment.
+        """
+        old_path = match.group(1)
+
+        if mode == "full_path" and current_dir:
+            # Extract just the filename and attach it to the current target directory
+            filename = Path(old_path).name
+            new_path = current_dir / filename
+            return f'"{new_path}"'
+
+        elif mode == "date_only" and target_date_str:
+            # Find the date pattern (e.g., 2026\09\30) anywhere in the path
+            # and dynamically replace it with the new target date string
+            new_path = re.sub(
+                r"\d{4}[\\/]\d{2}[\\/]\d{2}",
+                # Use lambda to prevent Python from interpreting \10 or \1 as regex group references
+                lambda _: target_date_str,
+                old_path,
+            )
+            return f'"{new_path}"'
+
+        # Fallback to the original path if required arguments are missing
+        return f'"{old_path}"'
+
     def run(self):
         self.logger.info(
             f"--- Starting Aggregation Cycle for {self.target_date_str} ---"
@@ -216,7 +248,7 @@ class Aggregator:
                             target_file_name = Path(old_link).name
 
                             # 3. Dynamically reconstruct the pristine absolute path using our rigid structure
-                            # target_tree is already absolute: e.g., F:\A0807\04_WORKPLACE\Company
+                            # target_tree is already absolute: e.g., F:\ROOT\04_WORKPLACE\Company
                             new_link_path = (
                                 self.target_tree
                                 / target_branch
@@ -233,7 +265,7 @@ class Aggregator:
                             # 3. Apply ChangeLink if any mutation occurred
                             if old_link != new_link:
                                 if Path(new_link).exists():
-                                    # Grabs the last 8 parts of the path (e.g., "HQ/Branch/Reports/Report/2026/06/04/file.name")
+                                    # Grabs the last 8 parts of the path (e.g., "HQ\Branch\Reports\Report\2026\06\04\file.name")
                                     short_path = "\\".join(Path(new_link).parts[-8:])
                                     self.logger.info(
                                         f"    Mutating Link -> ...\\{short_path}"
@@ -250,7 +282,67 @@ class Aggregator:
                                 self.logger.warning(
                                     f"    Link is already set: {new_link}"
                                 )
-                    # Force calculation now that links are updated
+
+                    # --- POWER QUERY UPDATE BLOCK ---
+                    formulas_changed = False
+
+                    # Format the target datetime into a string like "2026\10\31"
+                    # Using r"%Y\%m\%d" ensures backslashes are treated literally
+                    target_date_str = self.target_datetime.strftime(r"%Y\%m\%d")
+
+                    # 1. Update paths inside the M-code (Queries)
+                    for query in wb_target.api.Queries:
+                        m_code = query.Formula
+                        # Use lambda to pass all required context to the helper method
+                        new_m_code = re.sub(
+                            r'"([^"]+\.xlsx)"',
+                            lambda m: self._update_mcode_path(
+                                match=m,
+                                mode="date_only",
+                                target_date_str=target_date_str,
+                            ),
+                            m_code,
+                        )
+                        if new_m_code != m_code:
+                            query.Formula = new_m_code
+                            formulas_changed = True
+                            self.logger.info(
+                                f"      -> Updating links in query: {query.Name}"
+                            )
+                    # Give the Mashup Engine time to recompile the queries
+                    # after the formula modification, especially with Table.Buffer
+                    if formulas_changed:
+                        self.logger.info(
+                            "      -> Waiting for Power Query engine to recompile..."
+                        )
+                        time.sleep(2.0)
+
+                    # 2. Refresh connections synchronously
+                    # Wrap the connection refresh in its own try/except block
+                    for conn in wb_target.api.Connections:
+                        try:
+                            # CRITICAL: Disable background refresh
+                            try:
+                                conn.OLEDBConnection.BackgroundQuery = False
+                            except Exception:
+                                pass
+
+                            self.logger.info(
+                                f"      -> Refreshing connection: {conn.Name}"
+                            )
+
+                            # Execute refresh and wait for it to finish
+                            conn.Refresh()
+
+                        except Exception as refresh_err:
+                            # Log the error but DO NOT crash the script for this file
+                            # This handles phantom or zombie connections seamlessly
+                            self.logger.warning(
+                                f"      -> SKIPPED connection '{conn.Name}' (Refresh failed: {refresh_err})"
+                            )
+                    # --- END OF POWER QUERY BLOCK ---
+
+                    # Force calculation now that links & queries are updated
                     app.calculate()
 
                     # 1. Save the Master File safely
