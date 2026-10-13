@@ -3,6 +3,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 import xlwings as xw
+import re
+import time
 
 
 class Generator:
@@ -161,6 +163,16 @@ class Generator:
             except Exception as e:
                 self.logger.error(f"  Unexpected error copying {file_name}: {e}")
                 return False
+
+    def _update_mcode_path(self, match, current_dir):
+        """
+        Helper method to extract the filename from the old path
+        and combine it with the current directory.
+        """
+        old_path = match.group(1)
+        filename = Path(old_path).name
+        new_path = current_dir / filename
+        return f'"{new_path}"'
 
     def run(self):
         self.logger.info(
@@ -346,6 +358,60 @@ class Generator:
                     )
                     try:
                         wb_target = app.books.open(target_path, update_links=True)
+
+                        # --- POWER QUERY UPDATE BLOCK ---
+                        formulas_changed = False
+
+                        # 1. Update paths inside the M-code (Queries)
+                        for query in wb_target.api.Queries:
+                            m_code = query.Formula
+                            # Replace the old path segment with the new one
+                            # Use lambda to pass the report_dir argument to our helper method
+                            new_m_code = re.sub(
+                                r'"([^"]+\.xlsx)"',
+                                lambda m: self._update_mcode_path(m, report_dir),
+                                m_code,
+                            )
+
+                            if new_m_code != m_code:
+                                query.Formula = new_m_code
+                                formulas_changed = True
+                                self.logger.info(
+                                    f"      -> Updating links in query: {query.Name}"
+                                )
+                        # Give the Mashup Engine time to recompile the queries
+                        # after the formula modification, especially with Table.Buffer
+                        if formulas_changed:
+                            self.logger.info(
+                                "      -> Waiting for Power Query engine to recompile..."
+                            )
+                            time.sleep(2.0)
+
+                        # 2. Refresh connections synchronously
+                        # Wrap the connection refresh in its own try/except block
+                        for conn in wb_target.api.Connections:
+                            try:
+                                # CRITICAL: Disable background refresh
+                                try:
+                                    conn.OLEDBConnection.BackgroundQuery = False
+                                except Exception:
+                                    pass
+
+                                self.logger.info(
+                                    f"      -> Refreshing connection: {conn.Name}"
+                                )
+
+                                # Execute refresh and wait for it to finish
+                                conn.Refresh()
+
+                            except Exception as refresh_err:
+                                # Log the error but DO NOT crash the script for this file
+                                # This handles phantom or zombie connections seamlessly
+                                self.logger.warning(
+                                    f"      -> SKIPPED connection '{conn.Name}' (Refresh failed: {refresh_err})"
+                                )
+                        # --- END OF POWER QUERY BLOCK ---
+
                         app.calculate()
                         self._safe_save(wb_target, file_name=target_path.name)
                         wb_target.close()
